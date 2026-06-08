@@ -12,6 +12,15 @@ DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
+# Security settings for production
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -20,8 +29,14 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    # opencbbl приложения
     'organizations',
     'api',
+    # pcmanager приложения
+    'apps.accounts',
+    'apps.inventory',
+    'apps.builds',
+    'apps.dashboard',
 ]
 
 MIDDLEWARE = [
@@ -55,6 +70,17 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'opencbbl.wsgi.application'
 
+# Database Routers для multi-DB архитектуры
+DATABASE_ROUTERS = [
+    'opencbbl.routers.AuthRouter',
+    'opencbbl.routers.OrganizationsRouter',
+    'opencbbl.routers.ApiRouter',
+    'opencbbl.routers.AccountsRouter',
+    'opencbbl.routers.InventoryRouter',
+    'opencbbl.routers.BuildsRouter',
+    'opencbbl.routers.DashboardRouter',
+]
+
 db_engine = os.getenv('DB_ENGINE', 'django.db.backends.sqlite3')
 if db_engine == 'django.db.backends.postgresql':
     DATABASES = {
@@ -65,14 +91,38 @@ if db_engine == 'django.db.backends.postgresql':
             'PASSWORD': os.getenv('DB_PASSWORD', ''),
             'HOST': os.getenv('DB_HOST', 'localhost'),
             'PORT': os.getenv('DB_PORT', '5432'),
-        }
+        },
+        'opencbbl_db': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('OPENCBBL_DB_NAME', 'opencbbl_data'),
+            'USER': os.getenv('DB_USER', 'opencbbl'),
+            'PASSWORD': os.getenv('DB_PASSWORD', ''),
+            'HOST': os.getenv('DB_HOST', 'localhost'),
+            'PORT': os.getenv('DB_PORT', '5432'),
+        },
+        'pcmanager_db': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('PCMANAGER_DB_NAME', 'pcmanager_data'),
+            'USER': os.getenv('DB_USER', 'opencbbl'),
+            'PASSWORD': os.getenv('DB_PASSWORD', ''),
+            'HOST': os.getenv('DB_HOST', 'localhost'),
+            'PORT': os.getenv('DB_PORT', '5432'),
+        },
     }
 else:
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / 'db.sqlite3',
-        }
+        },
+        'opencbbl_db': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'opencbbl_db.sqlite3',
+        },
+        'pcmanager_db': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'pcmanager_db.sqlite3',
+        },
     }
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -99,6 +149,11 @@ MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Auth URLs для pcmanager приложений
+LOGIN_URL = '/pcmanager/login/'
+LOGIN_REDIRECT_URL = '/pcmanager/'
+LOGOUT_REDIRECT_URL = '/pcmanager/login/'
 
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',

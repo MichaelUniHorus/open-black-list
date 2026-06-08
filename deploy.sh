@@ -1,50 +1,110 @@
 #!/bin/bash
-# Deployment script for opencbbl
+# Deployment script for opencbbl (without Docker)
 
-echo "=== Deploying opencbbl to production ==="
+set -e
 
-# 1. Install PostgreSQL on host (if not installed)
-echo "1. Setting up PostgreSQL..."
+echo "=== Deploying opencbbl to production (without Docker) ==="
+
+# 1. Install system dependencies
+echo "1. Installing system dependencies..."
 sudo apt update
-sudo apt install -y postgresql postgresql-contrib
+sudo apt install -y python3 python3-pip python3-venv postgresql postgresql-contrib nginx
 
-# 2. Create database and user
-sudo -u postgres psql -c "CREATE USER opencbbl WITH PASSWORD 'YOUR_STRONG_PASSWORD';"
-sudo -u postgres psql -c "CREATE DATABASE opencbbl OWNER opencbbl;"
+# 2. Setup PostgreSQL
+echo "2. Setting up PostgreSQL..."
+sudo -u postgres psql -c "CREATE USER opencbbl WITH PASSWORD 'YOUR_STRONG_PASSWORD';" || true
+sudo -u postgres psql -c "CREATE DATABASE opencbbl OWNER opencbbl;" || true
+sudo -u postgres psql -c "CREATE DATABASE opencbbl_data OWNER opencbbl;" || true
+sudo -u postgres psql -c "CREATE DATABASE pcmanager_data OWNER opencbbl;" || true
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE opencbbl TO opencbbl;"
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE opencbbl_data TO opencbbl;"
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE pcmanager_data TO opencbbl;"
 
-# 3. Create .env file
-echo "2. Creating .env file..."
-cat > .env << EOF
-SECRET_KEY=your-secret-key-here
-DEBUG=False
-ALLOWED_HOSTS=mikesdemos.ru,www.mikesdemos.ru,localhost,127.0.0.1
+# 3. Create virtual environment
+echo "3. Creating virtual environment..."
+python3 -m venv venv
+source venv/bin/activate
 
-DB_ENGINE=django.db.backends.postgresql
-DB_NAME=opencbbl
-DB_USER=opencbbl
-DB_PASSWORD=YOUR_STRONG_PASSWORD
-DB_HOST=localhost
-DB_PORT=5432
+# 4. Install Python dependencies
+echo "4. Installing Python dependencies..."
+pip install --upgrade pip
+pip install -r requirements.txt
 
-YANDEX_GEOCODER_API_KEY=b32b31d1-1157-4757-a682-66b6dbd87544
-FNS_API_KEY=7fa73c57b7386e64f4c0d2fe55787d101b579694
+# 5. Create .env file if not exists
+echo "5. Setting up .env file..."
+if [ ! -f .env ]; then
+    cp .env.example .env
+    echo "Please edit .env file with your actual settings"
+fi
+
+# 6. Run migrations for all databases
+echo "6. Running migrations..."
+python manage.py migrate --database=default
+python manage.py migrate --database=opencbbl_db
+python manage.py migrate --database=pcmanager_db
+
+# 7. Collect static files
+echo "7. Collecting static files..."
+python manage.py collectstatic --noinput
+
+# 8. Create superuser (optional)
+echo "8. Creating superuser (optional)..."
+python manage.py createsuperuser --noinput || echo "Superuser already exists or creation skipped"
+
+# 9. Setup systemd service
+echo "9. Setting up systemd service..."
+sudo tee /etc/systemd/system/opencbbl.service > /dev/null << EOF
+[Unit]
+Description=opencbbl Django application
+After=network.target postgresql.service
+
+[Service]
+User=$USER
+Group=www-data
+WorkingDirectory=$(pwd)
+Environment="PATH=$(pwd)/venv/bin"
+ExecStart=$(pwd)/venv/bin/gunicorn --config gunicorn.conf.py opencbbl.wsgi:application
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
-# 4. Build and start containers
-echo "3. Building Docker containers..."
-docker-compose build
+# 10. Setup Nginx
+echo "10. Setting up Nginx..."
+sudo tee /etc/nginx/sites-available/opencbbl > /dev/null << EOF
+server {
+    listen 80;
+    server_name mikesdemos.ru www.mikesdemos.ru;
 
-echo "4. Starting services..."
-docker-compose up -d
+    location /static/ {
+        alias $(pwd)/staticfiles/;
+    }
 
-# 5. Run migrations
-echo "5. Running migrations..."
-docker-compose exec -T web python manage.py migrate
+    location /media/ {
+        alias $(pwd)/media/;
+    }
 
-# 6. Collect static files
-echo "6. Collecting static files..."
-docker-compose exec -T web python manage.py collectstatic --noinput
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+
+sudo ln -sf /etc/nginx/sites-available/opencbbl /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# 11. Enable and start service
+echo "11. Starting systemd service..."
+sudo systemctl daemon-reload
+sudo systemctl enable opencbbl
+sudo systemctl restart opencbbl
 
 echo "=== Deployment complete ==="
-echo "Application should be available at http://mikesdemos.ru/black-list-cbrf"
+echo "Application should be available at http://mikesdemos.ru"
+echo "Check service status: sudo systemctl status opencbbl"
+echo "View logs: sudo journalctl -u opencbbl -f"

@@ -24,8 +24,25 @@ wheels/
 *.egg
 .env
 .venv
+# SQLite databases
 db.sqlite3
 db.sqlite3-journal
+opencbbl_db.sqlite3
+opencbbl_db.sqlite3-journal
+pcmanager_db.sqlite3
+pcmanager_db.sqlite3-journal
+# Media and static files
 /media
 /staticfiles
+# OS files
 .DS_Store
+Thumbs.db
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+# Logs
+*.log
+logs/
